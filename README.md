@@ -2,12 +2,6 @@
 
 > A modern peer-to-peer file sharing platform built with React, Vite and Supabase Realtime.
 
-![GitHub stars](https://img.shields.io/github/stars/aditya-baraik/OreoPie?style=for-the-badge)
-![GitHub forks](https://img.shields.io/github/forks/aditya-baraik/OreoPie?style=for-the-badge)
-![GitHub License](https://img.shields.io/github/license/aditya-baraik/OreoPie?style=for-the-badge)
-![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=for-the-badge&logo=vite&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)
-
 <p align="center">
   <img src="public/favicon.svg" width="120">
 </p>
