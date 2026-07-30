@@ -3,19 +3,23 @@ import { useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, X, Upload, Download, CheckSquare, Square, Shield,
-  Wifi, WifiOff, LogOut, FileText, Image, Video, Music, Archive,
-  Code, File, CheckCircle, Clock, AlertCircle, Send
+  Wifi, LogOut, FileText, Image, Video, Music, Archive,
+  Code, File, CheckCircle, Clock, Send, MessageCircle,
+  Bell, User as UserIcon, Lock, Trash2, Monitor, Smartphone, RefreshCw,
+  KeyRound, Eye, EyeOff, AlertTriangle
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
-import { searchUsers } from '@/lib/auth';
-import { getSession } from '@/lib/session';
+import { searchUsers, getDeviceSessions, removeDeviceSession, updatePassword, type DeviceSession } from '@/lib/auth';
+import { getSession, getOrCreateSessionToken } from '@/lib/session';
 import { fmtBytes, fmtSpeed, fmtEta, fileIconKind, isImage } from '@/lib/fileUtils';
 import type { IncomingTransfer, OutgoingTransfer } from '@/lib/p2p';
 
 // ── Top-level guard ──────────────────────────────────────────
 export default function DashboardPage() {
   const [, setLocation] = useLocation();
-  const { state, logout } = useApp();
+  const { state, logout, clearLoginAlerts } = useApp();
+  const [showLoginInfo, setShowLoginInfo] = useState(false);
+  const [showAlerts, setShowAlerts] = useState(false);
 
   useEffect(() => {
     if (!getSession()) setLocation('/');
@@ -27,6 +31,8 @@ export default function DashboardPage() {
   }
 
   if (!state.user) return null;
+
+  const alertCount = state.newLoginAlerts.length;
 
   return (
     <div className="oreopie-bg min-h-screen flex flex-col">
@@ -43,11 +49,65 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           <h1 className="font-display text-xl font-bold text-[#111111] tracking-wide">OreoPie</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <Shield size={14} className="text-[#083B3A]" />
-          <span className="font-mono text-xs text-[#8A4E2A]">
-            <span className="text-[#111111] font-bold">{state.user.username}</span>
-          </span>
+
+          {/* New login alert bell */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowAlerts(!showAlerts); if (alertCount > 0) clearLoginAlerts(); }}
+              className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-[#083B3A]/8 transition-all"
+              title="Login alerts"
+            >
+              <Bell size={15} className="text-[#8A4E2A]" />
+              {alertCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#6D001A] text-white text-[9px] font-bold flex items-center justify-center">
+                  {alertCount > 9 ? '9+' : alertCount}
+                </span>
+              )}
+            </button>
+            <AnimatePresence>
+              {showAlerts && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                  className="absolute right-0 top-10 w-72 glass rounded-xl border border-[#CDB49E]/40 shadow-lg z-50 overflow-hidden"
+                >
+                  <div className="px-3 py-2.5 border-b border-[#CDB49E]/20">
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A]">Login Alerts</p>
+                  </div>
+                  {state.newLoginAlerts.length === 0 ? (
+                    <p className="px-4 py-4 font-mono text-xs text-[#CDB49E] text-center">No recent alerts</p>
+                  ) : (
+                    state.newLoginAlerts.slice().reverse().map((alert, i) => (
+                      <div key={i} className="px-3 py-2.5 border-b border-[#CDB49E]/15 last:border-0">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle size={12} className="text-[#6D001A] flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-mono text-xs text-[#111111] font-medium">{alert.deviceLabel}</p>
+                            <p className="font-mono text-[10px] text-[#8A4E2A]">
+                              {new Date(alert.timestamp).toLocaleTimeString()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Username / Login Info button */}
+          <button
+            onClick={() => setShowLoginInfo(true)}
+            className="flex items-center gap-1.5 text-xs text-[#8A4E2A] hover:text-[#111111] transition-colors px-2.5 py-1.5 rounded-lg hover:bg-[#083B3A]/8 border border-transparent hover:border-[#CDB49E]/30"
+          >
+            <UserIcon size={13} />
+            <span className="font-mono font-bold text-[#111111]">{state.user.username}</span>
+          </button>
+
           <button
             onClick={handleLogout}
             data-testid="button-logout"
@@ -73,11 +133,18 @@ export default function DashboardPage() {
           <RecipientsPanel />
         </aside>
 
-        {/* Right panel — Transfer */}
+        {/* Right panel — Transfer + Chat */}
         <main className="flex-1 flex flex-col overflow-hidden">
           <TransferPanel />
         </main>
       </div>
+
+      {/* Login Info Modal */}
+      <AnimatePresence>
+        {showLoginInfo && (
+          <LoginInfoModal user={state.user} onClose={() => setShowLoginInfo(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -165,7 +232,6 @@ function RecipientsPanel() {
           </span>
         </div>
 
-        {/* Search bar */}
         <div className="relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CDB49E]" />
           <input
@@ -179,7 +245,6 @@ function RecipientsPanel() {
           />
         </div>
 
-        {/* Search results dropdown */}
         <AnimatePresence>
           {results.length > 0 && (
             <motion.div
@@ -215,7 +280,6 @@ function RecipientsPanel() {
         </AnimatePresence>
       </div>
 
-      {/* Recipient list */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {state.addedRecipients.length === 0 ? (
           <div className="text-center py-12 space-y-2">
@@ -268,7 +332,6 @@ function RecipientsPanel() {
         )}
       </div>
 
-      {/* Security note */}
       <div className="p-4 border-t border-[#CDB49E]/20">
         <div className="flex items-center gap-2 px-3 py-2.5 bg-[#083B3A]/6 border border-[#083B3A]/15 rounded-xl">
           <Shield size={12} className="text-[#083B3A] flex-shrink-0" />
@@ -281,12 +344,11 @@ function RecipientsPanel() {
   );
 }
 
-// ── Transfer Panel ───────────────────────────────────────────
+// ── Transfer Panel (with Chat tab) ───────────────────────────
 function TransferPanel() {
-  const [tab, setTab] = useState<'send' | 'received'>('send');
+  const [tab, setTab] = useState<'send' | 'chat' | 'received'>('send');
   const { state } = useApp();
 
-  // Auto-switch to received tab on new incoming
   const prevIncoming = useRef(state.incomingTransfers.length);
   useEffect(() => {
     if (state.incomingTransfers.length > prevIncoming.current) {
@@ -295,37 +357,245 @@ function TransferPanel() {
     prevIncoming.current = state.incomingTransfers.length;
   }, [state.incomingTransfers.length]);
 
+  const completedCount = state.incomingTransfers.filter((t) => t.url).length;
+  const unreadChat = tab !== 'chat' && state.chatMessages.length > 0;
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden p-5 gap-4">
       {/* Tabs */}
       <div className="flex gap-1 p-1 glass rounded-xl w-fit">
-        {(['send', 'received'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            data-testid={`tab-${t}`}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              tab === t
-                ? 'bg-[#083B3A] text-white shadow-sm'
-                : 'text-[#8A4E2A] hover:text-[#111111] hover:bg-white/40'
-            }`}
-          >
-            {t === 'send' ? 'Send Files' : `Received ${state.incomingTransfers.length > 0 ? `(${state.incomingTransfers.filter(t => t.url).length})` : ''}`}
-          </button>
-        ))}
+        <button
+          onClick={() => setTab('send')}
+          data-testid="tab-send"
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+            tab === 'send'
+              ? 'bg-[#083B3A] text-white shadow-sm'
+              : 'text-[#8A4E2A] hover:text-[#111111] hover:bg-white/40'
+          }`}
+        >
+          Send Files
+        </button>
+
+        {/* Chat tab — sits between Send and Received */}
+        <button
+          onClick={() => setTab('chat')}
+          data-testid="tab-chat"
+          className={`relative px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+            tab === 'chat'
+              ? 'bg-[#083B3A] text-white shadow-sm'
+              : 'text-[#8A4E2A] hover:text-[#111111] hover:bg-white/40'
+          }`}
+        >
+          <MessageCircle size={12} />
+          Chat
+          {unreadChat && (
+            <span className="w-1.5 h-1.5 rounded-full bg-[#6D001A] flex-shrink-0" />
+          )}
+        </button>
+
+        <button
+          onClick={() => setTab('received')}
+          data-testid="tab-received"
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+            tab === 'received'
+              ? 'bg-[#083B3A] text-white shadow-sm'
+              : 'text-[#8A4E2A] hover:text-[#111111] hover:bg-white/40'
+          }`}
+        >
+          {`Received${completedCount > 0 ? ` (${completedCount})` : ''}`}
+        </button>
       </div>
 
       <AnimatePresence mode="wait">
-        {tab === 'send' ? (
+        {tab === 'send' && (
           <motion.div key="send" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="flex-1 overflow-y-auto flex flex-col gap-4">
             <SendPanel />
           </motion.div>
-        ) : (
+        )}
+        {tab === 'chat' && (
+          <motion.div key="chat" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="flex-1 overflow-hidden flex flex-col">
+            <ChatPanel />
+          </motion.div>
+        )}
+        {tab === 'received' && (
           <motion.div key="received" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="flex-1 overflow-y-auto">
             <ReceivedPanel />
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ── Chat Panel ───────────────────────────────────────────────
+function ChatPanel() {
+  const { state, sendChatMessage } = useApp();
+  const [activePeer, setActivePeer] = useState<string | null>(null);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const connectedPeers = [...state.peers.entries()]
+    .filter(([, p]) => p.status === 'connected')
+    .map(([u]) => u);
+
+  // Auto-select first connected peer
+  useEffect(() => {
+    if (!activePeer && connectedPeers.length > 0) {
+      setActivePeer(connectedPeers[0]);
+    }
+    if (activePeer && !connectedPeers.includes(activePeer)) {
+      setActivePeer(connectedPeers[0] ?? null);
+    }
+  }, [connectedPeers.join(',')]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [state.chatMessages.length]);
+
+  const currentUser = state.user?.username ?? '';
+  const peerMessages = activePeer
+    ? state.chatMessages.filter(
+        (m) => m.fromUsername === activePeer || m.fromUsername === currentUser
+      )
+    : [];
+
+  async function handleSend() {
+    if (!input.trim() || !activePeer || sending) return;
+    setSending(true);
+    await sendChatMessage(activePeer, input.trim());
+    setInput('');
+    setSending(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
+  if (connectedPeers.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 py-20 gap-3">
+        <div className="w-16 h-16 rounded-2xl bg-[#083B3A]/8 flex items-center justify-center">
+          <MessageCircle size={24} className="text-[#083B3A]/50" />
+        </div>
+        <p className="font-display text-sm font-semibold text-[#111111]">No connected peers</p>
+        <p className="font-mono text-xs text-[#8A4E2A] text-center max-w-48">
+          Connect with someone first to start an encrypted chat
+        </p>
+        <div className="flex items-center gap-2 mt-2 px-3 py-2 bg-[#083B3A]/6 border border-[#083B3A]/15 rounded-xl">
+          <Lock size={11} className="text-[#083B3A] flex-shrink-0" />
+          <p className="font-mono text-[10px] text-[#083B3A]">AES-256-GCM · end-to-end encrypted · no server</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 gap-3 overflow-hidden h-full min-h-0">
+      {/* Peer list (only shown if multiple peers) */}
+      {connectedPeers.length > 1 && (
+        <div className="w-36 flex-shrink-0 flex flex-col gap-1.5 overflow-y-auto">
+          <span className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A] px-1 mb-1">Peers</span>
+          {connectedPeers.map((u) => (
+            <button
+              key={u}
+              onClick={() => setActivePeer(u)}
+              className={`flex items-center gap-2 px-2.5 py-2 rounded-xl text-left transition-all ${
+                activePeer === u
+                  ? 'bg-[#083B3A] text-white'
+                  : 'glass text-[#111111] hover:bg-white/50'
+              }`}
+            >
+              <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${
+                activePeer === u ? 'bg-white/20 text-white' : 'bg-[#CDB49E] text-[#111111]'
+              }`}>
+                {u.slice(0, 2).toUpperCase()}
+              </div>
+              <span className="font-mono text-xs truncate">{u}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Chat window */}
+      <div className="flex-1 flex flex-col glass rounded-2xl overflow-hidden min-h-0">
+        {/* Chat header */}
+        <div className="px-4 py-2.5 border-b border-[#CDB49E]/20 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Avatar username={activePeer ?? ''} size="sm" teal />
+            <div>
+              <p className="font-mono text-xs font-bold text-[#111111]">{activePeer}</p>
+              <p className="font-mono text-[9px] text-[#083B3A]">E2E encrypted · memory only</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Lock size={10} className="text-[#083B3A]" />
+            <span className="font-mono text-[9px] text-[#083B3A]">AES-256-GCM</span>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 min-h-0">
+          {peerMessages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-2 py-8">
+              <Lock size={18} className="text-[#CDB49E]" />
+              <p className="font-mono text-xs text-[#8A4E2A] text-center">
+                Say hi! This chat is encrypted.<br />
+                <span className="text-[10px] text-[#CDB49E]">Messages clear when you close the tab.</span>
+              </p>
+            </div>
+          ) : (
+            peerMessages.map((msg) => {
+              const isMe = msg.fromUsername === currentUser;
+              return (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-xs leading-relaxed ${
+                    isMe
+                      ? 'bg-[#083B3A] text-white rounded-br-sm'
+                      : 'bg-white/70 text-[#111111] rounded-bl-sm border border-[#CDB49E]/30'
+                  }`}>
+                    <p className="break-words">{msg.text}</p>
+                    <p className={`font-mono text-[9px] mt-1 ${isMe ? 'text-white/50' : 'text-[#CDB49E]'}`}>
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <div className="px-3 py-3 border-t border-[#CDB49E]/20 flex gap-2 flex-shrink-0">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message…"
+            maxLength={2000}
+            className="flex-1 px-3 py-2 rounded-xl text-sm bg-white/60 border border-[#CDB49E]/50
+              focus:border-[#083B3A] focus:ring-1 focus:ring-[#083B3A]/15 outline-none transition-all font-mono"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || sending}
+            className="w-9 h-9 rounded-xl bg-[#083B3A] text-white flex items-center justify-center hover:bg-[#0a4a49] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+          >
+            <Send size={14} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -344,7 +614,6 @@ function SendPanel() {
 
   return (
     <>
-      {/* Drop zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -389,7 +658,6 @@ function SendPanel() {
         />
       </div>
 
-      {/* Outgoing transfers */}
       {state.outgoingTransfers.length > 0 && (
         <div className="space-y-2">
           <span className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A]">Outgoing</span>
@@ -522,7 +790,6 @@ function ReceivedPanel() {
 
   return (
     <div className="space-y-3">
-      {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
         {completed.length > 0 && (
           <button onClick={toggleAll} className="flex items-center gap-1.5 text-xs text-[#8A4E2A] hover:text-[#111111] transition-colors" data-testid="button-select-all">
@@ -542,7 +809,6 @@ function ReceivedPanel() {
         )}
       </div>
 
-      {/* File list */}
       <AnimatePresence initial={false}>
         {state.incomingTransfers.map((t, i) => (
           <IncomingFileRow
@@ -560,7 +826,6 @@ function ReceivedPanel() {
   );
 }
 
-// ── Incoming file row (own hook for speed tracking) ──────────
 function IncomingFileRow({
   transfer: t,
   bytesReceived,
@@ -591,7 +856,6 @@ function IncomingFileRow({
       }`}
       data-testid={`received-file-${index}`}
     >
-      {/* Checkbox */}
       {t.url && (
         <button
           onClick={() => onToggleSelect(t.transferId)}
@@ -603,14 +867,12 @@ function IncomingFileRow({
         </button>
       )}
 
-      {/* Preview / Icon */}
       <div className="w-12 h-12 rounded-xl bg-[#E7E3DD] overflow-hidden flex items-center justify-center flex-shrink-0">
         {isImage(t.mime) && t.url
           ? <img src={t.url} alt={t.name} className="w-full h-full object-cover" />
           : <FileTypeIcon mime={t.mime} />}
       </div>
 
-      {/* Info */}
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-[#111111] truncate" title={t.name}>{t.name}</p>
         <div className="flex items-center gap-2 mt-0.5">
@@ -637,7 +899,6 @@ function IncomingFileRow({
         )}
       </div>
 
-      {/* Download / status */}
       {t.url ? (
         <button
           onClick={() => onDownload(t)}
@@ -649,6 +910,290 @@ function IncomingFileRow({
       ) : (
         <Clock size={12} className="text-[#CDB49E] flex-shrink-0 status-connecting" />
       )}
+    </motion.div>
+  );
+}
+
+// ── Login Info Modal ─────────────────────────────────────────
+function LoginInfoModal({ user, onClose }: { user: { id: string; username: string; email: string }; onClose: () => void }) {
+  const [tab, setTab] = useState<'sessions' | 'password'>('sessions');
+  const [sessions, setSessions] = useState<DeviceSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  // Password change state
+  const [oldPass, setOldPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [confirmPass, setConfirmPass] = useState('');
+  const [showOld, setShowOld] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState(false);
+  const [pwLoading, setPwLoading] = useState(false);
+
+  const currentToken = getOrCreateSessionToken();
+
+  const loadSessions = useCallback(async () => {
+    setLoading(true);
+    const data = await getDeviceSessions(user.id, currentToken);
+    setSessions(data);
+    setLoading(false);
+  }, [user.id, currentToken]);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  async function handleRemove(sessionId: string) {
+    setRemoving(sessionId);
+    await removeDeviceSession(sessionId);
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    setRemoving(null);
+  }
+
+  async function handlePasswordChange(e: React.FormEvent) {
+    e.preventDefault();
+    setPwError('');
+    setPwSuccess(false);
+    if (newPass !== confirmPass) { setPwError('New passwords do not match'); return; }
+    if (newPass.length < 6) { setPwError('Password must be at least 6 characters'); return; }
+    setPwLoading(true);
+    try {
+      await updatePassword(user.username, oldPass, newPass);
+      setPwSuccess(true);
+      setOldPass(''); setNewPass(''); setConfirmPass('');
+    } catch (err: unknown) {
+      setPwError(err instanceof Error ? err.message : 'Failed to update password');
+    } finally {
+      setPwLoading(false);
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 16 }}
+        className="w-full max-w-md glass rounded-2xl border border-[#CDB49E]/40 shadow-2xl overflow-hidden"
+      >
+        {/* Modal header */}
+        <div className="px-5 py-4 border-b border-[#CDB49E]/20 flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-base font-bold text-[#111111]">Login Info</h2>
+            <p className="font-mono text-[10px] text-[#8A4E2A]">{user.username} · {user.email}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg hover:bg-[#6D001A]/10 transition-all flex items-center justify-center text-[#CDB49E] hover:text-[#6D001A]"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Sub-tabs */}
+        <div className="flex gap-1 p-2 border-b border-[#CDB49E]/20">
+          <button
+            onClick={() => setTab('sessions')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              tab === 'sessions' ? 'bg-[#083B3A] text-white' : 'text-[#8A4E2A] hover:bg-white/40'
+            }`}
+          >
+            <Monitor size={12} />
+            Active Sessions
+          </button>
+          <button
+            onClick={() => setTab('password')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              tab === 'password' ? 'bg-[#083B3A] text-white' : 'text-[#8A4E2A] hover:bg-white/40'
+            }`}
+          >
+            <KeyRound size={12} />
+            Change Password
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-4 max-h-80 overflow-y-auto">
+          {tab === 'sessions' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A]">
+                  {sessions.length} device{sessions.length !== 1 ? 's' : ''}
+                </span>
+                <button
+                  onClick={loadSessions}
+                  disabled={loading}
+                  className="flex items-center gap-1 text-[10px] font-mono text-[#083B3A] hover:opacity-70 transition-opacity"
+                >
+                  <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+                  Refresh
+                </button>
+              </div>
+
+              {loading ? (
+                <div className="py-8 text-center font-mono text-xs text-[#CDB49E]">Loading sessions…</div>
+              ) : sessions.length === 0 ? (
+                <div className="py-8 text-center">
+                  <p className="font-mono text-xs text-[#8A4E2A]">No sessions found</p>
+                  <p className="font-mono text-[10px] text-[#CDB49E] mt-1">
+                    Run the SQL migration to enable session tracking
+                  </p>
+                </div>
+              ) : (
+                sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                      s.isCurrent
+                        ? 'bg-[#083B3A]/6 border-[#083B3A]/20'
+                        : 'bg-white/30 border-[#CDB49E]/20'
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-[#CDB49E]/20 flex items-center justify-center flex-shrink-0">
+                      {s.device_info?.os === 'Android' || s.device_info?.os === 'iOS'
+                        ? <Smartphone size={14} className="text-[#8A4E2A]" />
+                        : <Monitor size={14} className="text-[#8A4E2A]" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-mono text-xs font-medium text-[#111111] truncate">
+                          {s.device_info?.label || 'Unknown device'}
+                        </p>
+                        {s.isCurrent && (
+                          <span className="px-1.5 py-0.5 bg-[#083B3A] text-white text-[9px] font-mono rounded-md flex-shrink-0">
+                            This device
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-mono text-[10px] text-[#CDB49E]">
+                        {new Date(s.last_active).toLocaleString()}
+                      </p>
+                    </div>
+                    {!s.isCurrent && (
+                      <button
+                        onClick={() => handleRemove(s.id)}
+                        disabled={removing === s.id}
+                        className="w-7 h-7 rounded-lg hover:bg-[#6D001A]/10 transition-all flex items-center justify-center text-[#CDB49E] hover:text-[#6D001A] flex-shrink-0"
+                        title="Remove this session"
+                      >
+                        {removing === s.id
+                          ? <RefreshCw size={12} className="animate-spin" />
+                          : <Trash2 size={12} />}
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+
+              <div className="flex items-start gap-2 mt-3 px-3 py-2.5 bg-[#083B3A]/6 border border-[#083B3A]/15 rounded-xl">
+                <Shield size={11} className="text-[#083B3A] flex-shrink-0 mt-0.5" />
+                <p className="font-mono text-[9px] text-[#083B3A] leading-relaxed">
+                  Removing a session signs that device out immediately.
+                  If you don't recognise a device, remove it and change your password.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {tab === 'password' && (
+            <form onSubmit={handlePasswordChange} className="space-y-3">
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A] mb-1.5 block">
+                  Current Password
+                </label>
+                <div className="relative">
+                  <Lock size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CDB49E]" />
+                  <input
+                    type={showOld ? 'text' : 'password'}
+                    value={oldPass}
+                    onChange={(e) => setOldPass(e.target.value)}
+                    required
+                    placeholder="Enter current password"
+                    className="w-full pl-8 pr-9 py-2.5 rounded-xl text-sm bg-white/60 border border-[#CDB49E]/50 focus:border-[#083B3A] focus:ring-1 focus:ring-[#083B3A]/15 outline-none transition-all font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOld(!showOld)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#CDB49E] hover:text-[#8A4E2A]"
+                  >
+                    {showOld ? <EyeOff size={13} /> : <Eye size={13} />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A] mb-1.5 block">
+                  New Password
+                </label>
+                <div className="relative">
+                  <KeyRound size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CDB49E]" />
+                  <input
+                    type={showNew ? 'text' : 'password'}
+                    value={newPass}
+                    onChange={(e) => setNewPass(e.target.value)}
+                    required
+                    minLength={6}
+                    placeholder="Min. 6 characters"
+                    className="w-full pl-8 pr-9 py-2.5 rounded-xl text-sm bg-white/60 border border-[#CDB49E]/50 focus:border-[#083B3A] focus:ring-1 focus:ring-[#083B3A]/15 outline-none transition-all font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNew(!showNew)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#CDB49E] hover:text-[#8A4E2A]"
+                  >
+                    {showNew ? <EyeOff size={13} /> : <Eye size={13} />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A] mb-1.5 block">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <KeyRound size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CDB49E]" />
+                  <input
+                    type="password"
+                    value={confirmPass}
+                    onChange={(e) => setConfirmPass(e.target.value)}
+                    required
+                    placeholder="Repeat new password"
+                    className="w-full pl-8 pr-3 py-2.5 rounded-xl text-sm bg-white/60 border border-[#CDB49E]/50 focus:border-[#083B3A] focus:ring-1 focus:ring-[#083B3A]/15 outline-none transition-all font-mono"
+                  />
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {pwError && (
+                  <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                    className="font-mono text-xs text-[#6D001A] flex items-center gap-1.5">
+                    <AlertTriangle size={11} /> {pwError}
+                  </motion.p>
+                )}
+                {pwSuccess && (
+                  <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                    className="font-mono text-xs text-[#083B3A] flex items-center gap-1.5">
+                    <CheckCircle size={11} /> Password updated successfully
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              <button
+                type="submit"
+                disabled={pwLoading}
+                className="w-full py-2.5 rounded-xl bg-[#083B3A] text-white text-sm font-semibold hover:bg-[#0a4a49] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {pwLoading ? 'Updating…' : 'Update Password'}
+              </button>
+            </form>
+          )}
+        </div>
+      </motion.div>
     </motion.div>
   );
 }
