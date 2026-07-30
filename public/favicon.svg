@@ -1,29 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-  <!-- Rounded square background -->
-  <rect width="100" height="100" rx="24" fill="#083B3A"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background -->
+  <rect width="64" height="64" rx="16" fill="#0F172A"/>
 
-  <!-- Subtle inner glow -->
-  <rect width="100" height="100" rx="24" fill="url(#glow)" opacity="0.18"/>
+  <!-- OreoPie Monogram -->
+  <circle
+    cx="32"
+    cy="32"
+    r="18"
+    stroke="#F8FAFC"
+    stroke-width="6"
+  />
 
-  <!-- Outer ring -->
-  <circle cx="50" cy="50" r="31" stroke="#CDB49E" stroke-width="5.5"/>
-
-  <!-- Pie-slice fill: top-right sector (~100° arc), represents the "Pie" in OreoPie -->
-  <path d="M50 50 L50 19 A31 31 0 0 1 79.8 64.5 Z" fill="#CDB49E" opacity="0.22"/>
-
-  <!-- Bright arc highlight on the pie slice edge -->
-  <path d="M50 19 A31 31 0 0 1 79.8 64.5" stroke="#E7E3DD" stroke-width="5.5" stroke-linecap="round"/>
-
-  <!-- Inner dot — the "Oreo" centre -->
-  <circle cx="50" cy="50" r="6.5" fill="#CDB49E"/>
-
-  <!-- Tiny centre highlight -->
-  <circle cx="48" cy="48" r="2" fill="white" opacity="0.55"/>
-
-  <defs>
-    <radialGradient id="glow" cx="30%" cy="25%" r="60%">
-      <stop offset="0%" stop-color="white"/>
-      <stop offset="100%" stop-color="transparent"/>
-    </radialGradient>
-  </defs>
+  <!-- Pie Slice -->
+  <path
+    d="M32 32 L48 24 A18 18 0 0 1 42 46 Z"
+    fill="#F8FAFC"
+  />
 </svg>
