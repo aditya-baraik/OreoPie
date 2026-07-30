@@ -1,5 +1,14 @@
 import { supabase } from './supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import {
+  generateECDHKeyPair,
+  exportPublicKey,
+  importPublicKey,
+  deriveSharedKey,
+  encryptMessage,
+  decryptMessage,
+  type ECDHKeyPair,
+} from './crypto';
 
 export const CHUNK_SIZE = 64 * 1024; // 64 KB
 
@@ -18,6 +27,13 @@ export interface Peer {
   conn: RTCPeerConnection;
   dc: RTCDataChannel | null;
   sessionId: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  fromUsername: string;
+  text: string;
+  timestamp: number;
 }
 
 export interface IncomingTransfer {
@@ -49,6 +65,15 @@ type BroadcastMsg =
   | { type: 'answer';  from: string; to: string; sdp: RTCSessionDescriptionInit }
   | { type: 'ice';     from: string; to: string; candidate: RTCIceCandidateInit };
 
+/** Per-peer ECDH key state — lives only in memory, never serialised */
+interface PeerCryptoState {
+  keyPair: ECDHKeyPair;
+  sharedKey: CryptoKey | null;
+  myPubKeyB64: string;
+  theirPubKeyB64: string | null;
+  ready: boolean;
+}
+
 export class P2PManager {
   readonly username: string;
 
@@ -56,6 +81,7 @@ export class P2PManager {
   private sessionChannels = new Map<string, RealtimeChannel>();
   private peers = new Map<string, Peer>(); // keyed by username
   private incoming = new Map<string, IncomingTransfer>(); // keyed by transferId
+  private cryptoState = new Map<string, PeerCryptoState>(); // keyed by peerUsername
 
   // ── Callbacks ──────────────────────────────────────────────
   onPeersChanged?:       (peers: Map<string, Peer>) => void;
@@ -68,6 +94,7 @@ export class P2PManager {
   onOutgoingStart?:      (transferId: string, name: string, size: number, peerUsername: string) => void;
   onOutgoingProgress?:   (transferId: string, sent: number, total: number) => void;
   onOutgoingComplete?:   (transferId: string) => void;
+  onChatMessage?:        (msg: ChatMessage) => void;
   onError?:              (msg: string) => void;
 
   constructor(username: string) {
@@ -90,7 +117,6 @@ export class P2PManager {
   sendRequest(toUsername: string): string {
     const sessionId = crypto.randomUUID();
     this.signalTo(toUsername, { type: 'request', from: this.username, sessionId });
-    // Add peer in 'pending' state
     const conn = this.buildConn(toUsername, sessionId, true /* initiator */);
     const peer: Peer = { username: toUsername, status: 'pending', conn, dc: null, sessionId };
     this.peers.set(toUsername, peer);
@@ -100,7 +126,6 @@ export class P2PManager {
 
   acceptRequest(fromUsername: string, sessionId: string): void {
     this.signalTo(fromUsername, { type: 'request-accepted', from: this.username, sessionId });
-    // Join session channel as answerer
     this.joinSession(sessionId, fromUsername, false);
   }
 
@@ -120,6 +145,7 @@ export class P2PManager {
       }
       this.peers.delete(username);
     }
+    this.cryptoState.delete(username);
     this.onPeersChanged?.(new Map(this.peers));
   }
 
@@ -127,7 +153,7 @@ export class P2PManager {
     return new Map(this.peers);
   }
 
-  /** Send one or more files to a set of connected peers */
+  /** Send one or more files to all connected peers */
   async sendFiles(toUsernames: string[], files: File[]): Promise<void> {
     for (const file of files) {
       for (const username of toUsernames) {
@@ -154,7 +180,6 @@ export class P2PManager {
           if (done) break;
           for (let i = 0; i < value.length; i += CHUNK_SIZE) {
             const chunk = value.slice(i, i + CHUNK_SIZE);
-            // Back-pressure: wait if buffer is filling up
             while (peer.dc.bufferedAmount > 8 * 1024 * 1024) {
               await new Promise((r) => setTimeout(r, 40));
             }
@@ -169,6 +194,31 @@ export class P2PManager {
     }
   }
 
+  /**
+   * Send an encrypted chat message to a specific peer.
+   * The message is encrypted with AES-256-GCM using the ECDH-derived shared key.
+   * It never leaves the WebRTC DataChannel — Supabase is not involved.
+   */
+  async sendChatMessage(toUsername: string, text: string): Promise<void> {
+    const peer = this.peers.get(toUsername);
+    if (!peer?.dc || peer.dc.readyState !== 'open') {
+      this.onError?.(`${toUsername} is not connected`);
+      return;
+    }
+    const cs = this.cryptoState.get(toUsername);
+    if (!cs?.sharedKey) {
+      this.onError?.('Secure channel not ready yet — wait a moment and retry');
+      return;
+    }
+    const encrypted = await encryptMessage(cs.sharedKey, text);
+    peer.dc.send(JSON.stringify({
+      kind: 'chat',
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      ...encrypted,
+    }));
+  }
+
   /** Tear everything down (call on logout / beforeunload) */
   disconnect(): void {
     this.peers.forEach((p) => {
@@ -176,6 +226,7 @@ export class P2PManager {
       p.conn.close();
     });
     this.peers.clear();
+    this.cryptoState.clear();
     this.sessionChannels.forEach((ch) => supabase.removeChannel(ch));
     this.sessionChannels.clear();
     if (this.personalChannel) {
@@ -205,7 +256,6 @@ export class P2PManager {
     if (msg.type === 'request') {
       this.onConnectionRequest?.(msg.from, msg.sessionId);
     } else if (msg.type === 'request-accepted') {
-      // We were the initiator — now join the session channel and start WebRTC
       this.onRequestAccepted?.(msg.from);
       const peer = this.peers.get(msg.from);
       if (peer) {
@@ -229,11 +279,9 @@ export class P2PManager {
     });
     ch.subscribe(async () => {
       if (initiator) {
-        // Start WebRTC negotiation after channel is subscribed
-        await new Promise((r) => setTimeout(r, 300)); // small delay for other side to subscribe
+        await new Promise((r) => setTimeout(r, 300));
         const peer = this.peers.get(peerUsername);
         if (peer && peer.status !== 'connected') {
-          // Trigger offer via onnegotiationneeded
           const dc = peer.conn.createDataChannel('oreopie', { ordered: true });
           this.setupDC(peer, dc);
           const offer = await peer.conn.createOffer();
@@ -246,7 +294,6 @@ export class P2PManager {
           });
         }
       } else {
-        // Make sure we have a peer entry for the answerer side
         if (!this.peers.has(peerUsername)) {
           const conn = this.buildConn(peerUsername, sessionId, false);
           const peer: Peer = { username: peerUsername, status: 'connecting', conn, dc: null, sessionId };
@@ -268,7 +315,6 @@ export class P2PManager {
     const from = msg.from;
     let peer = this.peers.get(from);
     if (!peer) {
-      // Answerer side: create peer if not yet
       const conn = this.buildConn(from, sessionId, false);
       peer = { username: from, status: 'connecting', conn, dc: null, sessionId };
       this.peers.set(from, peer);
@@ -330,46 +376,107 @@ export class P2PManager {
     return conn;
   }
 
-  private setupDC(peer: Peer, dc: RTCDataChannel): void {
+  private async setupDC(peer: Peer, dc: RTCDataChannel): Promise<void> {
     dc.binaryType = 'arraybuffer';
     peer.dc = dc;
-    dc.onopen = () => {
+
+    dc.onopen = async () => {
       peer.status = 'connected';
       this.onPeersChanged?.(new Map(this.peers));
+
+      // ── Initiate ECDH key exchange over the DataChannel ──────
+      // Keys are generated fresh every time a DataChannel opens.
+      // They stay in JS memory only and are discarded when the channel closes.
+      const keyPair = await generateECDHKeyPair();
+      const myPubKeyB64 = await exportPublicKey(keyPair.publicKey);
+      this.cryptoState.set(peer.username, {
+        keyPair,
+        sharedKey: null,
+        myPubKeyB64,
+        theirPubKeyB64: null,
+        ready: false,
+      });
+      dc.send(JSON.stringify({ kind: 'key-exchange', pubkey: myPubKeyB64 }));
     };
+
     dc.onclose = () => {
       peer.status = 'disconnected';
+      this.cryptoState.delete(peer.username);
       this.onPeersChanged?.(new Map(this.peers));
     };
+
     dc.onerror = () => {
       peer.status = 'failed';
       this.onPeersChanged?.(new Map(this.peers));
     };
+
     dc.onmessage = (e) => this.handleData(peer.username, e.data);
   }
 
-  private handleData(fromUsername: string, data: string | ArrayBuffer): void {
+  private async handleData(fromUsername: string, data: string | ArrayBuffer): Promise<void> {
     if (typeof data === 'string') {
-      const msg = JSON.parse(data);
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(data);
+      } catch {
+        return;
+      }
+
+      // ── ECDH key exchange ──
+      if (msg.kind === 'key-exchange') {
+        const theirPubKeyB64 = msg.pubkey as string;
+        const cs = this.cryptoState.get(fromUsername);
+        if (!cs) return;
+
+        cs.theirPubKeyB64 = theirPubKeyB64;
+        const theirPubKey = await importPublicKey(theirPubKeyB64);
+        cs.sharedKey = await deriveSharedKey(cs.keyPair.privateKey, theirPubKey);
+        cs.ready = true;
+        return;
+      }
+
+      // ── Encrypted chat message ──
+      if (msg.kind === 'chat') {
+        const cs = this.cryptoState.get(fromUsername);
+        if (!cs?.sharedKey) return; // key not ready, drop
+
+        try {
+          const plaintext = await decryptMessage(cs.sharedKey, {
+            iv: msg.iv as string,
+            ciphertext: msg.ciphertext as string,
+          });
+          this.onChatMessage?.({
+            id: (msg.id as string) || crypto.randomUUID(),
+            fromUsername,
+            text: plaintext,
+            timestamp: (msg.timestamp as number) || Date.now(),
+          });
+        } catch {
+          // Decryption failure — tampered message, silently drop
+        }
+        return;
+      }
+
+      // ── File transfer control messages ──
       if (msg.kind === 'file-start') {
         const t: IncomingTransfer = {
-          transferId: msg.transferId,
-          name: msg.name,
-          size: msg.size,
-          mime: msg.mime,
+          transferId: msg.transferId as string,
+          name: msg.name as string,
+          size: msg.size as number,
+          mime: msg.mime as string,
           received: 0,
           chunks: [],
           peerUsername: fromUsername,
         };
-        this.incoming.set(msg.transferId, t);
+        this.incoming.set(msg.transferId as string, t);
         this.onIncomingTransfer?.(t);
       } else if (msg.kind === 'file-end') {
-        const t = this.incoming.get(msg.transferId);
+        const t = this.incoming.get(msg.transferId as string);
         if (!t) return;
         t.blob = new Blob(t.chunks, { type: t.mime });
         t.url = URL.createObjectURL(t.blob);
         this.onTransferComplete?.({ ...t });
-        this.incoming.delete(msg.transferId);
+        this.incoming.delete(msg.transferId as string);
       }
     } else {
       // Binary chunk — find the latest open incoming transfer from this peer
