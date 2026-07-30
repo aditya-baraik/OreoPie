@@ -22,11 +22,10 @@ export async function signup(username: string, email: string, password: string):
   if (password.length < 6) throw new Error('Password must be at least 6 characters');
 
   const hash = await sha256(password + username);
-  const hint = btoa(unescape(encodeURIComponent(password))); // base64 for recovery
 
   const { data, error } = await supabase
     .from('oreopie_users')
-    .insert({ username, email, password_hash: hash, password_hint: hint })
+    .insert({ username, email, password_hash: hash, password_hint: '' })
     .select('id,username,email')
     .single();
 
@@ -53,6 +52,139 @@ export async function login(username: string, password: string): Promise<User> {
   return { id: data.id, username: data.username, email: data.email };
 }
 
+export async function updatePassword(
+  username: string,
+  oldPassword: string,
+  newPassword: string,
+): Promise<void> {
+  if (newPassword.length < 6) throw new Error('New password must be at least 6 characters');
+  const oldHash = await sha256(oldPassword + username);
+
+  // Verify old password first
+  const { data, error } = await supabase
+    .from('oreopie_users')
+    .select('id')
+    .eq('username', username)
+    .eq('password_hash', oldHash)
+    .single();
+
+  if (error || !data) throw new Error('Current password is incorrect');
+
+  const newHash = await sha256(newPassword + username);
+  const { error: updateErr } = await supabase
+    .from('oreopie_users')
+    .update({ password_hash: newHash })
+    .eq('username', username);
+
+  if (updateErr) throw new Error('Failed to update password');
+}
+
+// ── Device session management ────────────────────────────────
+
+export interface DeviceSession {
+  id: string;
+  session_token: string;
+  device_info: {
+    browser?: string;
+    os?: string;
+    label?: string;
+  };
+  created_at: string;
+  last_active: string;
+  isCurrent?: boolean;
+}
+
+function getDeviceInfo(): DeviceSession['device_info'] {
+  const ua = navigator.userAgent;
+  let browser = 'Unknown browser';
+  let os = 'Unknown OS';
+
+  if (ua.includes('Chrome') && !ua.includes('Edg') && !ua.includes('OPR')) browser = 'Chrome';
+  else if (ua.includes('Firefox')) browser = 'Firefox';
+  else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
+  else if (ua.includes('Edg')) browser = 'Edge';
+  else if (ua.includes('OPR') || ua.includes('Opera')) browser = 'Opera';
+
+  if (ua.includes('Windows')) os = 'Windows';
+  else if (ua.includes('Mac OS')) os = 'macOS';
+  else if (ua.includes('Linux')) os = 'Linux';
+  else if (ua.includes('Android')) os = 'Android';
+  else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+
+  return { browser, os, label: `${browser} on ${os}` };
+}
+
+/**
+ * Register this device's session in the DB.
+ * Safe to call — silently ignores if table doesn't exist yet.
+ */
+export async function registerDeviceSession(
+  userId: string,
+  username: string,
+  sessionToken: string,
+): Promise<void> {
+  try {
+    await supabase.from('oreopie_sessions').upsert(
+      {
+        user_id: userId,
+        username,
+        session_token: sessionToken,
+        device_info: getDeviceInfo(),
+        last_active: new Date().toISOString(),
+      },
+      { onConflict: 'session_token' },
+    );
+  } catch {
+    // Table may not exist yet — feature degrades gracefully
+  }
+}
+
+/** Fetch all active sessions for a user */
+export async function getDeviceSessions(
+  userId: string,
+  currentToken: string,
+): Promise<DeviceSession[]> {
+  try {
+    const { data, error } = await supabase
+      .from('oreopie_sessions')
+      .select('id,session_token,device_info,created_at,last_active')
+      .eq('user_id', userId)
+      .order('last_active', { ascending: false });
+
+    if (error || !data) return [];
+    return data.map((s) => ({
+      ...s,
+      isCurrent: s.session_token === currentToken,
+    })) as DeviceSession[];
+  } catch {
+    return [];
+  }
+}
+
+/** Remove a session by its DB row id */
+export async function removeDeviceSession(sessionRowId: string): Promise<void> {
+  try {
+    await supabase.from('oreopie_sessions').delete().eq('id', sessionRowId);
+  } catch {
+    // Ignore if table doesn't exist
+  }
+}
+
+/** Remove the current device's session on logout */
+export async function removeCurrentSession(sessionToken: string): Promise<void> {
+  try {
+    await supabase.from('oreopie_sessions').delete().eq('session_token', sessionToken);
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Password recovery — kept for backward compatibility with AuthPage.
+ * NOTE: New signups no longer store a password hint (hint is stored as empty string).
+ * For existing accounts that stored the old base64 hint, this will still work.
+ * Consider migrating to a proper email-based reset flow in future.
+ */
 export async function forgotPassword(username: string, email: string): Promise<string> {
   const { data, error } = await supabase
     .from('oreopie_users')
@@ -62,6 +194,9 @@ export async function forgotPassword(username: string, email: string): Promise<s
     .single();
 
   if (error || !data) throw new Error('No account matches that username and email');
+  if (!data.password_hint) {
+    throw new Error('Password recovery is not available for this account. Please contact support.');
+  }
   try {
     return decodeURIComponent(escape(atob(data.password_hint)));
   } catch {
