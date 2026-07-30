@@ -1,287 +1,236 @@
 # 🍪 OreoPie
 
-> A modern peer-to-peer file sharing platform built with React, Vite and Supabase Realtime.
-
 <p align="center">
-  <img src="public/favicon.svg" width="120">
+  <img src="public/favicon.svg" width="96" alt="OreoPie logo"/>
 </p>
 
 <p align="center">
-Modern, Secure & Lightning Fast Peer-to-Peer File Sharing Platform
+  <strong>Modern · Secure · Peer-to-Peer File Sharing & Chat</strong>
 </p>
 
 <p align="center">
-
-![React](https://img.shields.io/badge/React-19-blue?logo=react)
-![Vite](https://img.shields.io/badge/Vite-7-purple?logo=vite)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
-![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4-38BDF8?logo=tailwindcss)
-![License](https://img.shields.io/badge/License-MIT-green)
-
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white&style=flat-square"/>
+  <img src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white&style=flat-square"/>
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white&style=flat-square"/>
+  <img src="https://img.shields.io/badge/TailwindCSS-4-38BDF8?logo=tailwindcss&logoColor=white&style=flat-square"/>
+  <img src="https://img.shields.io/badge/WebRTC-DataChannel-orange?style=flat-square"/>
+  <img src="https://img.shields.io/badge/AES--256--GCM-Encrypted-green?style=flat-square"/>
+  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square"/>
 </p>
 
 ---
 
-## 🚀 Overview
+## Overview
 
-OreoPie is a modern peer-to-peer file sharing platform designed for fast, secure and seamless file transfers across devices.
+OreoPie is a browser-based peer-to-peer platform for **transferring files** and **chatting securely** between devices — with zero server involvement for your actual data.
 
-It focuses on:
-
-- ⚡ Fast Transfers
-- 🔒 Secure Connections
-- 📱 Cross Device Support
-- 👥 Group Sharing
-- 🌐 Browser Based
-- 🎨 Clean Modern UI
+- Files and chat travel **directly device-to-device** over encrypted WebRTC DataChannels.
+- Chat messages are **end-to-end encrypted** with AES-256-GCM using ephemeral ECDH keys.
+- Supabase is used **only** for signalling (WebRTC handshake) and authentication. No file bytes, no chat text, and no transfer history ever touch the server.
+- Everything clears when you close the tab.
 
 ---
 
-## ✨ Features
+## Security Architecture
 
-- Live transfer progress
-- Named sharing rooms
-- Multi-user file sharing
-- Drag & Drop uploads
-- Mobile friendly
-- Responsive Design
-- Secure architecture
+### File Transfers
 
----
+| Layer | Technology | What it does |
+|---|---|---|
+| Transport | WebRTC DataChannel + DTLS | TLS-grade encryption on every byte between devices |
+| Storage | Browser memory (ArrayBuffer) | Files are never written to disk or any server |
+| History | None | Cleared on tab close; no server logs |
 
-## 🛠 Tech Stack
+### Chat Messages
 
-| Technology | Usage |
-|------------|------|
-| React | UI |
-| TypeScript | Language |
-| Vite | Build Tool |
-| Tailwind CSS | Styling |
-| Supabase | Backend Services |
+| Layer | Technology | What it does |
+|---|---|---|
+| Key exchange | ECDH P-256 | Ephemeral key pair generated per connection, public keys exchanged over the DTLS-encrypted DataChannel |
+| Message encryption | AES-256-GCM | Each message encrypted with a fresh 96-bit random IV |
+| Storage | Browser memory only | No history in Supabase, no history in localStorage |
+| Forward secrecy | New keys per session | Closing and reopening a connection generates entirely new keys |
 
----
-
-## 📂 Project Structure
-
-```text
-src/
-public/
-package.json
-vite.config.ts
-tsconfig.json
-```
+**Man-in-the-middle?** Not possible in practice. Public keys are exchanged over the already-DTLS-encrypted WebRTC DataChannel — not over Supabase signalling. An attacker who controls Supabase Realtime cannot intercept or inject keys because the key exchange happens inside the encrypted tunnel.
 
 ---
 
-## ⚙️ Installation
+## Features
+
+- ⚡ **Direct P2P file transfer** — no upload/download size limits, no server copies
+- 💬 **Encrypted P2P chat** — AES-256-GCM, zero server involvement
+- 🔒 **Zero transfer history** — tab close wipes everything
+- 📱 **Responsive design** — works on mobile and desktop
+- 🖱️ **Drag & drop uploads**
+- 📥 **Batch download** with select-all
+- 👥 **Multi-peer sessions** — connect with multiple devices at once
+- 🔔 **New device login alerts** — get notified when your account logs in elsewhere
+- 🔑 **Device session management** — view and revoke active sessions
+- 🔐 **Password change** — requires current password for security
+
+---
+
+## Tech Stack
+
+| Technology | Role |
+|---|---|
+| React 19 + TypeScript | UI framework |
+| Vite 6 | Build tool & dev server |
+| Tailwind CSS 4 | Styling |
+| Supabase | Signalling + custom auth DB |
+| WebRTC DataChannel | P2P file & chat transport |
+| Web Crypto API (ECDH + AES-GCM) | End-to-end chat encryption |
+| Framer Motion | Animations |
+| shadcn/ui (Radix) | Component library |
+| Wouter | Client-side routing |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- A [Supabase](https://supabase.com) project
+
+### 1. Clone & install
 
 ```bash
+git clone <repo-url>
+cd oreopie
 npm install
 ```
 
-Run Development
+### 2. Set up Supabase
 
-```bash
-npm run dev
+Run the SQL in `supabase-migrations.sql` in your Supabase project's **SQL Editor**:
+
+```
+Supabase Dashboard → SQL Editor → New Query → paste & run
 ```
 
-Build
+This creates:
+- `oreopie_users` — custom auth table
+- `oreopie_sessions` — device session tracking
 
-```bash
-npm run build
-```
+### 3. Configure environment
 
-Preview
-
-```bash
-npm run preview
-```
-
----
-
-## 📜 License
-
-MIT License
-
----
-
-## 👨‍💻 Author
-
-Developed by **Aditya Baraik**
-
-
-# 🚀 How to Use
-
-## 1. Clone the Repository
-
-```bash
-git clone https://github.com/<your-username>/OreoPie.git
-cd OreoPie
-```
-
----
-
-## 2. Install Dependencies
-
-```bash
-npm install
-```
-
----
-
-## 3. Configure Environment Variables
-
-Create a `.env` file in the project root.
+Create a `.env` file (or set as Replit Secrets):
 
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-public-key
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-> Never commit the `.env` file.
-
----
-
-## 4. Start Development Server
+### 4. Run
 
 ```bash
 npm run dev
 ```
 
-The application will start on:
-
-```
-http://localhost:5173
-```
+Open `http://localhost:5173` in your browser.
 
 ---
 
-## 5. Build for Production
+## How to Use
 
-```bash
-npm run build
-```
+### Sending files
 
-Production files will be generated inside:
+1. **Sign up / Log in** with a username, email, and password.
+2. On the dashboard, **search** for a recipient's username in the left panel.
+3. Click **+** to send them a connection request.
+4. Once they **accept**, their status turns green.
+5. **Drag and drop** files onto the drop zone (or click to browse).
+6. Files transfer instantly — no upload, directly to their browser.
 
-```
-dist/
-```
+### Receiving files
 
----
+1. Accept the incoming connection request via the banner at the top.
+2. Switch to the **Received** tab to see incoming files.
+3. Click **Save** to download or **Download all** for batch download.
 
-## 6. Deploy
+### Chat
 
-Push changes to the `main` branch.
+1. Connect with at least one peer (accepted connection).
+2. Switch to the **Chat** tab.
+3. Select a peer from the list and start typing.
+4. Messages are end-to-end encrypted and exist only in memory — closing the tab deletes everything.
 
-GitHub Actions will automatically:
+### Login Info & Device Sessions
 
-- Install dependencies
-- Build the project
-- Deploy to GitHub Pages
-
----
-
-# 📤 File Transfer
-
-### Create Account
-
-- Choose a unique username
-- Enter your email
-- Create a password
+1. Click the **bell icon** in the header to see new login alerts.
+2. Click your **username** in the header → **Login Info** to manage sessions.
+3. View all active devices, see when they logged in, and **remove** any you don't recognise.
+4. **Change your password** from the same panel — requires your current password.
 
 ---
 
-### Sign In
-
-Login using:
-
-- Username
-- Password
-
----
-
-### Send Files
-
-1. Search another user's username.
-2. Select the recipient.
-3. Drag & drop files or choose files manually.
-4. Click **Send**.
-
----
-
-### Receive Files
-
-Incoming transfer requests appear automatically.
-
-Accept the request to begin receiving files.
-
----
-
-# 🛠 Tech Stack
-
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
-- Supabase Realtime
-- GitHub Pages
-- WebRTC Data Channels
-
----
-
-# 🔒 Security
-
-- SHA-256 password hashing
-- Peer-to-peer file transfer
-- Realtime signaling via Supabase
-- No third-party file storage
-
----
-
-# 📦 Project Structure
+## Project Structure
 
 ```
 src/
- ├── components/
- ├── context/
- ├── hooks/
- ├── lib/
- ├── pages/
- ├── App.tsx
- └── main.tsx
+├── components/
+│   └── ui/              # shadcn/ui primitives
+├── context/
+│   └── AppContext.tsx    # Global state + P2P bridge
+├── hooks/
+│   ├── use-mobile.tsx
+│   └── use-toast.ts
+├── lib/
+│   ├── auth.ts          # Custom auth + device sessions
+│   ├── crypto.ts        # ECDH + AES-256-GCM helpers
+│   ├── fileUtils.ts     # Formatting helpers
+│   ├── p2p.ts           # WebRTC P2P manager + encrypted chat
+│   ├── session.ts       # localStorage session helpers
+│   ├── supabase.ts      # Supabase client
+│   └── utils.ts         # Tailwind merge
+├── pages/
+│   ├── AuthPage.tsx
+│   ├── DashboardPage.tsx
+│   └── not-found.tsx
+├── App.tsx
+├── index.css
+└── main.tsx
 
 public/
-.github/
+├── favicon.svg
+└── robots.txt
+
+supabase-migrations.sql  # Run in Supabase SQL Editor
 ```
 
 ---
 
-# 🤝 Contributing
+## Available Scripts
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Start development server on `0.0.0.0:5173` |
+| `npm run build` | Production build |
+| `npm run serve` | Preview production build |
+| `npm run typecheck` | TypeScript type check |
+
+---
+
+## Security Notes
+
+- Passwords are hashed with **SHA-256(password + username)** before storage.
+- No plaintext passwords are stored anywhere.
+- Chat keys are **non-extractable** (`extractable: false`) from the Web Crypto API — they cannot be read from memory via JavaScript.
+- ECDH public keys travel over the **DTLS-encrypted WebRTC DataChannel** (not Supabase Realtime), preventing server-side MITM attacks.
+- There is no file or chat history — everything is discarded on disconnect or tab close.
+
+---
+
+## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-
-```bash
-git checkout -b feature/your-feature
-```
-
-3. Commit changes
-
-```bash
-git commit -m "Add new feature"
-```
-
-4. Push
-
-```bash
-git push origin feature/your-feature
-```
-
-5. Open a Pull Request.
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit changes: `git commit -m "Add feature"`
+4. Push: `git push origin feature/your-feature`
+5. Open a Pull Request
 
 ---
 
-# 📄 License
+## License
 
-Licensed under the MIT License.
+Licensed under the [MIT License](LICENSE).
