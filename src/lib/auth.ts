@@ -22,10 +22,11 @@ export async function signup(username: string, email: string, password: string):
   if (password.length < 6) throw new Error('Password must be at least 6 characters');
 
   const hash = await sha256(password + username);
+  const hint = btoa(unescape(encodeURIComponent(password)));
 
   const { data, error } = await supabase
     .from('oreopie_users')
-    .insert({ username, email, password_hash: hash, password_hint: '' })
+    .insert({ username, email, password_hash: hash, password_hint: hint })
     .select('id,username,email')
     .single();
 
@@ -161,13 +162,13 @@ export async function getDeviceSessions(
   }
 }
 
-/** Remove a session by its DB row id */
+/** Remove a session by its DB row id — throws on failure so caller can show error */
 export async function removeDeviceSession(sessionRowId: string): Promise<void> {
-  try {
-    await supabase.from('oreopie_sessions').delete().eq('id', sessionRowId);
-  } catch {
-    // Ignore if table doesn't exist
-  }
+  const { error } = await supabase
+    .from('oreopie_sessions')
+    .delete()
+    .eq('id', sessionRowId);
+  if (error) throw new Error(error.message);
 }
 
 /** Remove the current device's session on logout */
@@ -179,12 +180,6 @@ export async function removeCurrentSession(sessionToken: string): Promise<void> 
   }
 }
 
-/**
- * Password recovery — kept for backward compatibility with AuthPage.
- * NOTE: New signups no longer store a password hint (hint is stored as empty string).
- * For existing accounts that stored the old base64 hint, this will still work.
- * Consider migrating to a proper email-based reset flow in future.
- */
 export async function forgotPassword(username: string, email: string): Promise<string> {
   const { data, error } = await supabase
     .from('oreopie_users')
@@ -194,9 +189,6 @@ export async function forgotPassword(username: string, email: string): Promise<s
     .single();
 
   if (error || !data) throw new Error('No account matches that username and email');
-  if (!data.password_hint) {
-    throw new Error('Password recovery is not available for this account. Please contact support.');
-  }
   try {
     return decodeURIComponent(escape(atob(data.password_hint)));
   } catch {
