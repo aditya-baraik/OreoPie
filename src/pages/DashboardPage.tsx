@@ -14,7 +14,7 @@ import { getSession, getOrCreateSessionToken } from '@/lib/session';
 import { fmtBytes, fmtSpeed, fmtEta, fileIconKind, isImage } from '@/lib/fileUtils';
 import type { IncomingTransfer, OutgoingTransfer } from '@/lib/p2p';
 import { toast } from 'sonner';
-
+ 
 type MobileTab = 'people' | 'send' | 'chat' | 'received';
 
 // ── Top-level guard ──────────────────────────────────────────
