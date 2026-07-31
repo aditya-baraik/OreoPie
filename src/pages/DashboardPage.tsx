@@ -50,7 +50,7 @@ export default function DashboardPage() {
   const unreadChat = mobileTab !== 'chat' && state.chatMessages.length > 0;
 
   return (
-    <div className="oreopie-bg min-h-screen flex flex-col">
+    <div className="oreopie-bg h-dvh overflow-hidden flex flex-col">
       {/* Background blobs */}
       <div className="blob w-[600px] h-[600px] top-[-150px] right-[-150px]"
         style={{ background: 'rgba(8,59,58,0.08)' }} />
@@ -60,7 +60,7 @@ export default function DashboardPage() {
         style={{ background: 'rgba(138,78,42,0.06)' }} />
 
       {/* ── Header ── */}
-      <header className="relative z-10 glass-subtle border-b border-[#CDB49E]/30 px-4 py-3 flex items-center justify-between">
+      <header className="relative z-40 flex-shrink-0 glass-subtle border-b border-[#CDB49E]/30 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="font-display text-lg font-bold text-[#111111] tracking-wide">OreoPie</h1>
           <Shield size={12} className="text-[#083B3A] hidden sm:block" />
@@ -70,7 +70,7 @@ export default function DashboardPage() {
           {/* New login alert bell */}
           <div className="relative">
             <button
-              onClick={() => { setShowAlerts(!showAlerts); if (alertCount > 0) clearLoginAlerts(); }}
+              onClick={() => setShowAlerts((v) => !v)}
               className="relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-[#083B3A]/8 transition-all"
               title="Login alerts"
             >
@@ -83,33 +83,68 @@ export default function DashboardPage() {
             </button>
             <AnimatePresence>
               {showAlerts && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                  className="absolute right-0 top-10 w-64 glass rounded-xl border border-[#CDB49E]/40 shadow-lg z-50 overflow-hidden"
-                >
-                  <div className="px-3 py-2.5 border-b border-[#CDB49E]/20">
-                    <p className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A]">Login Alerts</p>
-                  </div>
-                  {state.newLoginAlerts.length === 0 ? (
-                    <p className="px-4 py-4 font-mono text-xs text-[#CDB49E] text-center">No recent alerts</p>
-                  ) : (
-                    state.newLoginAlerts.slice().reverse().map((alert, i) => (
-                      <div key={i} className="px-3 py-2.5 border-b border-[#CDB49E]/15 last:border-0">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle size={12} className="text-[#6D001A] flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="font-mono text-xs text-[#111111] font-medium">{alert.deviceLabel}</p>
-                            <p className="font-mono text-[10px] text-[#8A4E2A]">
-                              {new Date(alert.timestamp).toLocaleTimeString()}
-                            </p>
-                          </div>
-                        </div>
+                <>
+                  {/* Backdrop to close on outside tap */}
+                  <div
+                    className="fixed inset-0 z-[49]"
+                    onClick={() => setShowAlerts(false)}
+                  />
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                    className="absolute right-0 top-10 w-72 glass rounded-xl border border-[#CDB49E]/40 shadow-xl z-[50] overflow-hidden"
+                  >
+                    {/* Header */}
+                    <div className="px-3 py-2.5 border-b border-[#CDB49E]/20 flex items-center justify-between">
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-[#8A4E2A]">Login Alerts</p>
+                      <div className="flex items-center gap-2">
+                        {alertCount > 0 && (
+                          <button
+                            onClick={() => { clearLoginAlerts(); setShowAlerts(false); }}
+                            className="font-mono text-[9px] text-[#8A4E2A] hover:text-[#6D001A] transition-colors"
+                          >
+                            Dismiss all
+                          </button>
+                        )}
                       </div>
-                    ))
-                  )}
-                </motion.div>
+                    </div>
+
+                    {state.newLoginAlerts.length === 0 ? (
+                      <p className="px-4 py-5 font-mono text-xs text-[#CDB49E] text-center">No recent alerts</p>
+                    ) : (
+                      <>
+                        {state.newLoginAlerts.slice().reverse().map((alert, i) => (
+                          <div key={i} className="px-3 py-2.5 border-b border-[#CDB49E]/15 last:border-0">
+                            <div className="flex items-start gap-2">
+                              <div className="w-6 h-6 rounded-md bg-[#6D001A]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <AlertTriangle size={11} className="text-[#6D001A]" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-mono text-xs text-[#111111] font-medium truncate">
+                                  {alert.deviceLabel}
+                                </p>
+                                <p className="font-mono text-[10px] text-[#8A4E2A]">
+                                  New login · {new Date(alert.timestamp).toLocaleTimeString()}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {/* CTA to open Login Info and remove suspicious device */}
+                        <button
+                          onClick={() => { setShowAlerts(false); setShowLoginInfo(true); }}
+                          className="w-full px-3 py-2.5 bg-[#6D001A]/8 border-t border-[#6D001A]/15 flex items-center justify-center gap-1.5 hover:bg-[#6D001A]/12 transition-colors"
+                        >
+                          <UserIcon size={11} className="text-[#6D001A]" />
+                          <span className="font-mono text-[11px] text-[#6D001A] font-medium">
+                            View & remove devices →
+                          </span>
+                        </button>
+                      </>
+                    )}
+                  </motion.div>
+                </>
               )}
             </AnimatePresence>
           </div>
