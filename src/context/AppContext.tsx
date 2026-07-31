@@ -168,7 +168,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handler = () => {
       p2pRef.current?.disconnect();
-      // Remove DB session on close (best-effort)
+      // Clear local session so user is signed out on next open
+      clearSession();
+      // Remove DB session on close (best-effort, fire-and-forget)
       const token = getSessionToken();
       if (token) removeCurrentSession(token).catch(() => {});
     };
@@ -322,17 +324,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const sendChatMessage = useCallback(async (toUsername: string, text: string) => {
     if (!text.trim()) return;
-    await p2pRef.current?.sendChatMessage(toUsername, text);
-    // Add our own message to state immediately (optimistic)
-    dispatch({
-      type: 'ADD_CHAT_MESSAGE',
-      msg: {
-        id: crypto.randomUUID(),
-        fromUsername: state.user?.username ?? '',
-        text: text.trim(),
-        timestamp: Date.now(),
-      },
-    });
+    const sent = await p2pRef.current?.sendChatMessage(toUsername, text);
+    // Only add to state if actually sent (key exchange may have failed)
+    if (sent) {
+      dispatch({
+        type: 'ADD_CHAT_MESSAGE',
+        msg: {
+          id: crypto.randomUUID(),
+          fromUsername: state.user?.username ?? '',
+          text: text.trim(),
+          timestamp: Date.now(),
+        },
+      });
+    }
   }, [state.user?.username]);
 
   const clearLoginAlerts = useCallback(() => {
