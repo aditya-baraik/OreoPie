@@ -199,17 +199,28 @@ export class P2PManager {
    * The message is encrypted with AES-256-GCM using the ECDH-derived shared key.
    * It never leaves the WebRTC DataChannel — Supabase is not involved.
    */
-  async sendChatMessage(toUsername: string, text: string): Promise<void> {
+  async sendChatMessage(toUsername: string, text: string): Promise<boolean> {
     const peer = this.peers.get(toUsername);
     if (!peer?.dc || peer.dc.readyState !== 'open') {
       this.onError?.(`${toUsername} is not connected`);
-      return;
+      return false;
     }
-    const cs = this.cryptoState.get(toUsername);
+
+    // Wait up to 3 s for ECDH key exchange to finish (it runs right after DC opens)
+    let cs = this.cryptoState.get(toUsername);
     if (!cs?.sharedKey) {
-      this.onError?.('Secure channel not ready yet — wait a moment and retry');
-      return;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        cs = this.cryptoState.get(toUsername);
+        if (cs?.sharedKey) break;
+      }
     }
+
+    if (!cs?.sharedKey) {
+      this.onError?.('Secure channel not ready — please try again');
+      return false;
+    }
+
     const encrypted = await encryptMessage(cs.sharedKey, text);
     peer.dc.send(JSON.stringify({
       kind: 'chat',
@@ -217,6 +228,7 @@ export class P2PManager {
       timestamp: Date.now(),
       ...encrypted,
     }));
+    return true;
   }
 
   /** Tear everything down (call on logout / beforeunload) */
